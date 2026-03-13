@@ -1,10 +1,3 @@
-/*
-ps1recomp - simple ISO scanner to find SYSTEM.CNF and print its BOOT line
-Build: cc -o ps1recomp ps1recomp.c
-This version adds .cue parsing: finds MODE2/2352 track, computes its start sector,
-and reads ISO9660 starting from that track's sector.
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -376,70 +369,65 @@ int main(int argc, char **argv) {
         PSX_Exe game_exe;
         if (load_psx_exe("extracted.exe", &game_exe) == 0) {
             FILE* out = fopen("recompiled_game.c", "w");
-            if (!out) {
-                perror("Could not open output file");
-                return 1;
-            }
-
-            fprintf(out, "#include \"../src/ps1_runtime.h\"\n\nvoid game_entry(CPU_Context* ctx) {\n");
-
+            fprintf(out, "#include \"../src/ps1_runtime.h\"\n\n");
+            fprintf(out, "void game_entry(CPU_Context* ctx) {\n");
+            
             uint32_t current_pc = game_exe.pc;
-            // Safety: Ensure the entry point is actually within the destination range
-            if (current_pc < game_exe.dest_vaddr) {
-                fprintf(stderr, "Error: Entry point is outside of EXE range\n");
-                return 19;
-            }
-
             uint32_t buffer_offset = current_pc - game_exe.dest_vaddr;
             uint32_t instructions_count = game_exe.file_size / 4;
 
-            printf("Recompiling %u instructions...\n", instructions_count);
+            // Use a switch-case for the entire executable area
+            fprintf(out, "    switch(ctx->pc) {\n");
 
             for (uint32_t i = 0; i < instructions_count; i++) {
                 uint32_t pc = current_pc + (i * 4);
                 uint32_t phys_offset = buffer_offset + (i * 4);
-
                 if (phys_offset >= game_exe.file_size) break;
 
                 uint32_t instr = *(uint32_t*)&game_exe.body[phys_offset];
-                uint32_t next = 0;
-                if (phys_offset + 4 < game_exe.file_size) {
-                    next = *(uint32_t*)&game_exe.body[phys_offset + 4];
-                }
+                uint32_t next = (phys_offset + 4 < game_exe.file_size) ? *(uint32_t*)&game_exe.body[phys_offset + 4] : 0;
 
-                fprintf(out, "block_%08X:\n", pc);
-                // Call the recompiler and tell it to write to 'out'
+                fprintf(out, "block_%08X: ;\n", pc);
                 recompile_instruction(out, pc, instr, next);
                 
-                // Check if instr is a branch/jump to skip the delay slot i++
                 uint8_t op = instr >> 26;
-                if ((op >= 0x01 && op <= 0x07) || op == 0x02 || op == 0x03) {
-                    i++; 
+                int is_branch = ((op >= 0x01 && op <= 0x07) || op == 0x02 || op == 0x03);
+
+                // CRITICAL: If NOT a branch, the C code must move the PC manually
+                if (!is_branch) {
+                    fprintf(out, "    ctx->pc = 0x%08X;\n", pc + 4);
+                } else {
+                    // If IT IS a branch, we already handled the delay slot, so skip next instr
+                    i++;
                 }
             }
 
-            fprintf(out, "}\n");
-            fclose(out);
-            printf("Successfully recompiled to recompiled_game.c\n");
-            fprintf(out, "\n// The Dispatcher handles indirect jumps (like JR RA)\n");
+            fprintf(out, "        default: return;\n");
+            fprintf(out, "    }\n}\n\n");
+
             fprintf(out, "void dispatcher(CPU_Context* ctx) {\n");
+            fprintf(out, "    unsigned long long instr_count = 0;\n"); // Track progress
             fprintf(out, "    while(1) {\n");
-            fprintf(out, "        switch(ctx->pc) {\n");
-            fprintf(out, "            case 0x%08X: game_entry(ctx); break;\n", game_exe.pc);
-            fprintf(out, "            default:\n");
-            fprintf(out, "                printf(\"Jumped to unknown address 0x%%08X\\n\", ctx->pc);\n");
-            fprintf(out, "                return;\n");
+            fprintf(out, "        if (ctx->pc >= 0x%08X && ctx->pc < 0x%08X) {\n", 
+                            game_exe.dest_vaddr, game_exe.dest_vaddr + game_exe.file_size);
+            fprintf(out, "            game_entry(ctx);\n");
+            fprintf(out, "            instr_count++;\n");
+            fprintf(out, "            if (instr_count %% 1000000 == 0) {\n");
+            fprintf(out, "                printf(\"Milestone: %%llu instructions. Current PC: 0x%%08X\\n\", instr_count, ctx->pc);\n");
+            // Print the values of a few registers to see if they are changing
+            fprintf(out, "                printf(\"  v0: 0x%%08X, a0: 0x%%08X, sp: 0x%%08X\\n\", ctx->r[2], ctx->r[4], ctx->r[29]);\n");
+            fprintf(out, "            }\n");
+            fprintf(out, "        } else if (ctx->pc == 0x000000A0 || ctx->pc == 0xA0) {\n");
+            fprintf(out, "            printf(\"BIOS Call A0 detected! Function: 0x%%X\\n\", ctx->r[9]);\n");
+            fprintf(out, "            ctx->pc = ctx->r[31];\n"); // Return to caller ($ra)
+            fprintf(out, "        } else {\n");
+            fprintf(out, "            printf(\"Jumped to unknown address 0x%%08X\\n\", ctx->pc);\n");
+            fprintf(out, "            return;\n");
             fprintf(out, "        }\n");
             fprintf(out, "    }\n}\n");
 
-            fclose(out); // Now close the file
+            fclose(out);
             printf("Successfully recompiled to recompiled_game.c\n");
         }
     }
-
-    free(cnf_data);
-    free(dirbuf);
-    fclose(f);
-    if (bin_path) free(bin_path);
-    return 0;
 }

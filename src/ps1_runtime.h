@@ -18,6 +18,13 @@ static inline uint32_t map_addr(uint32_t addr) {
 }
 
 static inline uint32_t mem_read32(CPU_Context* ctx, uint32_t addr) {
+    // 0x1F801814 is the GPU STAT register
+    if (addr == 0x1F801814) {
+        // Return a fake value that says "GPU is ready and not busy"
+        // This often tricks the game into moving past the startup loop
+        return 0x14000000; 
+    }
+
     uint32_t offset = map_addr(addr);
     return *(uint32_t*)&ctx->ram[offset];
 }
@@ -39,3 +46,7 @@ static inline void mem_write8(CPU_Context* ctx, uint32_t addr, uint8_t val) {
 }
 
 #endif
+
+// Declarations for the recompiled game functions
+void game_entry(CPU_Context* ctx);
+void dispatcher(CPU_Context* ctx);
