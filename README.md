@@ -16,6 +16,8 @@ mkdir build && cd build
 cmake ..
 make
 ```
+NOTE: If you're using Ninja with Cmake. Run `ninja` instead of `make`
+
 ## Usage
 To use `ps1recomp.exe` with a .bin file. Simply run:
 ```
