@@ -19,16 +19,17 @@ make
 ## Usage
 To use `ps1recomp.exe` with a .bin file. Simply run:
 ```
-ps1recomp.exe game.bin
+./ps1recomp game.bin
 ```
-Replace `game.bin` with the actual name of your `.bin` file.
+Replace `game.bin` with the actual path/name of your `.bin` file.
 
-After running the command. You should get something like:
+If the output is successful. You should get
 ```
-Found file: SYSTEM.CNF;1
-BOOT = cdrom:\SCUS_949.00;1
+Successfully recompiled to recompiled_game.c
 ```
 
 ## Notes
 - Ensure the `.bin` has a matching `.cue` file; the tool relies on the `.cue` metadata.
+- The recompiler is still incomplete. So the generated C code of the game may contain a lot of missing opcodes. (As we have already tried it with Crash Bandicoot)
+- The runtime is still unfinished.
 - The project itself is still experimental and a lot of features still need to be added.
